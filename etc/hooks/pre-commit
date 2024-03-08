@@ -1,0 +1,179 @@
+#!/bin/sh
+
+print_unstage_instructions() {
+    echo "1.    git status"
+    echo "2.    You should see the command to unstage the problematic files."
+    echo "3.    Execute the command."
+}
+
+get_changed_files() {
+    git diff --cached --name-only
+}
+
+check_gitignore() {
+    # Empty initial commits do no harm. We shall allow them even without
+    # a valid .gitignore.
+    if [ $(git ls-files | wc -l) -eq 0 ]; then
+        return 0
+    fi
+
+    if [ ! -f .gitignore -o ! -s .gitignore ]; then
+        echo "$(err ERROR): There is no valid file .gitignore in the root directory!"
+        echo "       You can download .gitignore for PB071 here:"
+        echo "       https://gitlab.fi.muni.cz/pb071/template/-/blob/main/.gitignore?ref_type=heads"
+        return 1
+    fi
+
+    if ! git ls-files --cached | grep -Eq '^.gitignore$'; then
+        echo "$(err ERROR): The .gitignore file is not tracked by Git!"
+        echo "       Unstage the current commit, then use 'git add .gitignore' and 'git commit'"
+        echo "       to start tracking the file."
+        return 1
+    fi
+}
+
+warn_hw_misspelling() {
+    BRANCH_NAME=$(get_current_branch_name)
+    if ! is_hw_branch "$BRANCH_NAME" && (echo "$BRANCH_NAME" | regex_insensitive "hw"); then
+        echo "$(warn WARNING): You are committing to branch '$BRANCH_NAME'."
+        echo "This is not a valid homework branch name."
+    fi
+}
+
+forbid_wrong_main_branch_name() {
+    BRANCH_NAME=$(get_current_branch_name)
+
+    if [ "master" = "$BRANCH_NAME" ]; then
+        echo "$(err ERROR): You should work on branch 'main' instead of 'master'."
+        return 1
+    fi
+}
+
+check_hw_template_exists() {
+    BRANCH_NAME=$(get_current_branch_name)
+
+    if ! is_hw_branch "$BRANCH_NAME"; then
+        return 0
+    fi
+
+    MAIN_DIRS=$(git ls-tree -d --name-only "$MAIN_BRANCH")
+
+    if ! (printf "$MAIN_DIRS" | regex_exact "$BRANCH_NAME"); then
+        echo "$(err ERROR): There is no template directory for $BRANCH_NAME in branch '$MAIN_BRANCH'."
+        echo "       Before committing to branch '$BRANCH_NAME',"
+        echo "       add the template for '$BRANCH_NAME' into branch '$MAIN_BRANCH'!"
+        echo ""
+        echo "Do the following:"
+        echo ""
+        echo "1.    git stash                  # Save current work"
+        echo "2.    git switch $MAIN_BRANCH            # Change branch to 'main'"
+        echo "3.    git pull upstream $MAIN_BRANCH     # Fetch and merge latest 'main' from upstream"
+        echo "4.    git push origin $MAIN_BRANCH       # Push new changes to your 'main'"
+        echo "5.    git switch $BRANCH_NAME            # Switch back to '$BRANCH_NAME'"
+        echo "6     git cherry-pick -x ..$MAIN_BRANCH  # Copy new commits from '$MAIN_BRANCH' onto '$BRANCH_NAME'"
+        echo "7.    git stash pop              # Restore saved work"
+        echo "8.    Resolve any conflicts."
+        echo ""
+        echo "$HELP_MESSAGE"
+        return 1
+    fi
+    return 0
+}
+
+check_that_working_in_hw_folder() {
+    BRANCH_NAME=$(get_current_branch_name)
+
+    if ! is_hw_branch "$BRANCH_NAME"; then
+        return 0
+    fi
+
+    CHANGED_FILES=$(get_changed_files)
+    if $(printf "$CHANGED_FILES" | regex_inverse "^$BRANCH_NAME/*"); then
+        FILES_NOT_IN_FOLDER=$(printf "$CHANGED_FILES" | regex_output_inverse "^$BRANCH_NAME/*")
+        echo "$(err ERROR): You should work only inside the directory $BRANCH_NAME."
+        echo "       The following files are not in the $BRANCH_NAME directory:"
+        echo "$FILES_NOT_IN_FOLDER"
+        echo ""
+        echo "Do following:"
+        echo ""
+        print_unstage_instructions
+        echo ""
+        echo "$HELP_MESSAGE"
+        return 1
+    fi
+}
+
+_get_file_types() {
+    # $1 contains files separated by <newline>
+    OLD_IFS="$IFS"
+    IFS='
+' # This is <newline>
+    for FILE in $1; do
+        file "$FILE"
+    done
+    IFS="$OLD_IFS"
+}
+
+
+check_executables() {
+    CHANGED_FILES=$(get_changed_files)
+    FILES=$(_get_file_types "$CHANGED_FILES")
+    if $(echo "$FILES" | regex "executable"); then
+        echo "$(warn WARNING): These files are executable:"
+        echo ""
+        echo "$FILES" | regex_output "executable" | cut -d":" -f1
+
+        echo "To fix this problem, do the following:"
+        echo ""
+        print_unstage_instructions
+        echo ""
+        echo "$HELP_MESSAGE"
+        return 1
+    fi
+}
+
+_get_big_files() {
+    # $1 contains files separated by <newline>
+    OLD_IFS="$IFS"
+    IFS='
+' # This is <newline>
+    for FILE in $1; do
+        if [ $(wc -c "$FILE" | cut -d" " -f1) -gt "$2" ]; then
+            echo "$FILE"
+        fi
+    done
+    IFS="$OLD_IFS"
+}
+
+check_big_files() {
+    CHANGED_FILES=$(get_changed_files)
+    BIG_FILES=$(_get_big_files "$CHANGED_FILES" "50000")
+    if [ -n "$BIG_FILES" ]; then
+        echo "$(warn WARNING): These files are potentionally big:"
+        echo "$BIG_FILES"
+
+        echo "To fix this problem, do following:"
+        echo ""
+        print_unstage_instructions
+        echo ""
+        echo "$HELP_MESSAGE"
+        return 1
+    fi
+}
+
+. .git/hooks/pb071-common.sh
+
+set -e
+exec 1>&2
+
+check_gitignore
+warn_hw_misspelling
+forbid_wrong_main_branch_name
+check_hw_template_exists
+check_that_working_in_hw_folder
+
+if command -v file >/dev/null 2>&1; then
+    check_executables
+fi
+
+check_big_files

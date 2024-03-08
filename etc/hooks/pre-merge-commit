@@ -1,0 +1,88 @@
+#!/bin/sh
+
+print_help_merge_message() {
+    echo "Do the following to abort the merge:"
+    echo ""
+    echo "1.    git merge --abort  # Abort ongoing merge"
+    echo ""
+    echo "$HELP_MESSAGE"
+    echo ""
+    echo "To continue, write the command below."
+}
+
+get_merging_branch_name() {
+    MERGE_ARG=$(echo "$GIT_REFLOG_ACTION" | cut -d' ' -f2)
+    BRANCH_NAME=$(git name-rev --name-only --no-undefined --refs="refs/heads/*" "$MERGE_ARG")
+
+    if echo "$BRANCH_NAME" | regex "~"; then
+        echo "$(warn WARNING): '$MERGE_ARG' is not a branch name." 1>&2
+        echo "To solve this, use a valid branch name." 1>&2
+        print_help_merge_message 1>&2
+        return 1
+    fi
+
+    echo "$BRANCH_NAME"
+}
+
+warn_merge_into_hw() {
+    BRANCH_NAME=$(get_current_branch_name)
+    if ! is_hw_branch "$BRANCH_NAME"; then
+        return 0
+    fi
+
+    echo "$(warn WARNING): You are merging into '$BRANCH_NAME'."
+    echo "         This can potentially break a lot of things."
+    print_help_merge_message
+
+    return 1
+}
+
+forbid_merge_main_and_hw_into_hw() {
+    BRANCH_NAME=$(get_current_branch_name)
+    if ! is_hw_branch "$BRANCH_NAME"; then
+        return 0
+    fi
+
+    MERGING_BRANCH_NAME=$(get_merging_branch_name)
+
+    if is_hw_branch "$MERGING_BRANCH_NAME" || [ "$MERGING_BRANCH_NAME" = "$MAIN_BRANCH" ]; then
+        echo "$(err ERROR): You cannot merge '$MERGING_BRANCH_NAME' into '$BRANCH_NAME'."
+        echo "Do following to abort the merge:"
+        echo ""
+        echo "1.    git merge --abort  # Abort ongoing merge"
+        echo ""
+        echo "$HELP_MESSAGE"
+        echo ""
+        echo "$(warn NOTE): Please ignore the line bellow."
+        return 1
+    fi
+}
+
+warn_merge_into_main_before_review() {
+    BRANCH_NAME=$(get_current_branch_name)
+    MERGING_BRANCH_NAME=$(get_merging_branch_name)
+
+
+    if [ "$BRANCH_NAME" != "$MAIN_BRANCH" ]; then
+        return 0
+    fi
+
+    if ! is_hw_branch "$MERGING_BRANCH_NAME"; then
+        return 0
+    fi
+
+    echo "$(warn WARNING): Continue only if your reviewer has approved the submission."
+    print_help_merge_message
+    return 1
+}
+
+
+. .git/hooks/pb071-common.sh
+
+set -e
+
+exec 1>&2
+
+forbid_merge_main_and_hw_into_hw
+warn_merge_into_hw
+warn_merge_into_main_before_review

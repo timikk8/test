@@ -1,0 +1,4 @@
+/home/timikk8/pb071/pb071/seminar-02/build/CMakeFiles/drawer.dir
+/home/timikk8/pb071/pb071/seminar-02/build/CMakeFiles/tests.dir
+/home/timikk8/pb071/pb071/seminar-02/build/CMakeFiles/edit_cache.dir
+/home/timikk8/pb071/pb071/seminar-02/build/CMakeFiles/rebuild_cache.dir
